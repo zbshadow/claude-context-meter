@@ -1,0 +1,8 @@
+{
+  "name": "claude-context-meter",
+  "version": "1.0.0",
+  "description": "Persistent context window usage meter displayed in the Claude Code status line",
+  "settings": {
+    "statusLine": "node ${pluginDir}/context_meter.js"
+  }
+}
