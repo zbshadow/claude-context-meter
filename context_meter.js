@@ -86,13 +86,20 @@ function detectVcs(cwd = process.cwd(), exec = execSync) {
     // no remote configured
   }
 
+  let dirty = false;
+  try {
+    dirty = run('git status --porcelain').length > 0;
+  } catch {
+    // default to clean if git status fails
+  }
+
   if (!branch) {
     let hash = 'HEAD';
     try { hash = run('git rev-parse --short HEAD'); } catch { /* use fallback */ }
-    return { type: 'detached', platform, repo, hash };
+    return { type: 'detached', platform, repo, hash, dirty };
   }
 
-  return { type: 'branch', platform, repo, branch };
+  return { type: 'branch', platform, repo, branch, dirty };
 }
 
 function formatVcs(vcsState) {
@@ -100,13 +107,24 @@ function formatVcs(vcsState) {
     return `${GRAY} · [No version control]${RESET}`;
   }
 
+  const { dirty } = vcsState;
+  const color = dirty ? CYAN : GRAY;
+  const star = dirty ? '*' : '';
+
   if (vcsState.type === 'detached') {
-    const parts = [vcsState.platform, vcsState.repo, `HEAD detached-${vcsState.hash}`].filter(Boolean);
-    return `${GRAY} · [${parts.join('/')}]${RESET}`;
+    const bracketParts = [vcsState.platform, vcsState.repo].filter(Boolean);
+    const bracket = bracketParts.length ? `[${bracketParts.join('/')}] ` : '';
+    const content = `${bracket}(HEAD detached at ${vcsState.hash})${star}`;
+    return dirty
+      ? `${GRAY} · ${RESET}${color}${content}${RESET}`
+      : `${GRAY} · ${content}${RESET}`;
   }
 
   const parts = [vcsState.platform, vcsState.repo, vcsState.branch].filter(Boolean);
-  return `${GRAY} · ${RESET}${CYAN}[${parts.join('/')}]${RESET}`;
+  const content = `[${parts.join('/')}${star}]`;
+  return dirty
+    ? `${GRAY} · ${RESET}${color}${content}${RESET}`
+    : `${GRAY} · ${content}${RESET}`;
 }
 
 function render(tokens, pct, vcsState = { type: 'none' }) {
