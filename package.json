@@ -1,0 +1,26 @@
+{
+  "name": "claude-context-meter",
+  "version": "1.0.0",
+  "description": "Persistent context window usage meter for the Claude Code status line",
+  "bin": {
+    "claude-context-meter": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "context_meter.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zbshadow/claude-context-meter.git"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "context",
+    "status-line"
+  ]
+}
