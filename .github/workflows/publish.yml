@@ -30,7 +30,8 @@ jobs:
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
 
       - name: Bump version
-        run: npm version patch -m "chore: bump version to %s [skip ci]"
+        run: |
+          npm version patch -m "chore: bump version to %s [skip ci]"
 
       - name: Push version commit and tag
         run: git push --follow-tags
