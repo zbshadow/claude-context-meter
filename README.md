@@ -19,7 +19,7 @@ The status line updates automatically — no polling or background process requi
 ## Prerequisites
 
 - **Claude Code** (any version that supports the `statusLine` setting)
-- **Python 3** — verify with `python3 --version` (no third-party packages required)
+- **Node.js** — already installed as part of Claude Code; no additional installation required
 
 ## Installation
 
@@ -34,12 +34,12 @@ The status line updates automatically — no polling or background process requi
 
    ```json
    {
-     "statusLine": "python3 /path/to/claude-context-meter/context_meter.py"
+     "statusLine": "node /path/to/claude-context-meter/context_meter.js"
    }
    ```
 
    Replace `/path/to/claude-context-meter` with the actual path where you cloned the repo.  
-   Example: if you cloned into your home directory, use `~/claude-context-meter/context_meter.py`.
+   Example: if you cloned into your home directory, use `~/claude-context-meter/context_meter.js`.
 
 3. **Start a new Claude Code session** — the status line activates immediately before the first API call, showing `Context: 0 (0%)` in green.
 
@@ -53,14 +53,13 @@ Context: 0 (0%)
 
 Send any message to Claude. After the API response the token count and percentage will update to reflect the current session context. If the status line does not appear, check that:
 
-- `~/.claude/settings.json` contains the `statusLine` key with the correct absolute path to `context_meter.py`
-- `python3` is on your `PATH` (run `python3 --version` in the same terminal)
+- `~/.claude/settings.json` contains the `statusLine` key with the correct absolute path to `context_meter.js`
 - You opened a **new** Claude Code session after editing `settings.json`
 
 ## Running tests
 
 ```sh
-python3 -m unittest discover -s tests -v
+node --test tests/test_context_meter.js
 ```
 
-All 26 tests should pass with no external dependencies.
+All 26 tests pass with no external dependencies — Node.js standard library only.

@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "description": "Persistent context window usage meter displayed in the Claude Code status line",
   "settings": {
-    "statusLine": "python3 ${pluginDir}/context_meter.py"
+    "statusLine": "node ${pluginDir}/context_meter.js"
   }
 }
