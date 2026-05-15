@@ -39,12 +39,18 @@ def parse_input(data):
     return tokens, pct
 
 
+_ANSI = {"green": GREEN, "yellow": YELLOW, "red": RED}
+_RED_ZONE_MSG = " · Consider /compact or /clear"
+
+
 def render(tokens, pct):
     formatted = format_tokens(tokens)
     pct_int = round(pct)
+    category = classify(tokens)
     line = f"Context: {formatted} ({pct_int}%)"
-    color = GREEN
-    return f"{color}{line}{RESET}"
+    if category == "red":
+        line += _RED_ZONE_MSG
+    return f"{_ANSI[category]}{line}{RESET}"
 
 
 def main():

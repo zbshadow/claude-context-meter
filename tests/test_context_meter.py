@@ -5,9 +5,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from context_meter import format_tokens, parse_input, render
+from context_meter import classify, format_tokens, parse_input, render
 
 GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
 RESET = "\033[0m"
 
 
@@ -74,6 +76,23 @@ class TestJsonParser(unittest.TestCase):
         self.assertEqual(pct, 0)
 
 
+class TestThresholdClassifier(unittest.TestCase):
+    def test_zero_is_green(self):
+        self.assertEqual(classify(0), "green")
+
+    def test_below_threshold_is_green(self):
+        self.assertEqual(classify(69_999), "green")
+
+    def test_at_green_threshold_is_yellow(self):
+        self.assertEqual(classify(70_000), "yellow")
+
+    def test_at_yellow_threshold_is_yellow(self):
+        self.assertEqual(classify(100_000), "yellow")
+
+    def test_above_yellow_threshold_is_red(self):
+        self.assertEqual(classify(100_001), "red")
+
+
 class TestRenderer(unittest.TestCase):
     def test_initial_state(self):
         result = render(0, 0)
@@ -87,13 +106,36 @@ class TestRenderer(unittest.TestCase):
         self.assertTrue(result.startswith(GREEN))
         self.assertTrue(result.endswith(RESET))
 
+    def test_yellow(self):
+        result = render(85_000, 43.0)
+        self.assertIn("Context: 85k (43%)", result)
+        self.assertTrue(result.startswith(YELLOW))
+        self.assertTrue(result.endswith(RESET))
+        self.assertNotIn("Consider", result)
+
+    def test_red_with_suggestion(self):
+        result = render(112_000, 56.0)
+        self.assertIn("Context: 112k (56%)", result)
+        self.assertIn("· Consider /compact or /clear", result)
+        self.assertTrue(result.startswith(RED))
+        self.assertTrue(result.endswith(RESET))
+
+    def test_no_suggestion_in_green(self):
+        result = render(24300, 18.0)
+        self.assertNotIn("Consider", result)
+
+    def test_no_suggestion_in_yellow(self):
+        result = render(85_000, 43.0)
+        self.assertNotIn("Consider", result)
+
     def test_percentage_rounds(self):
         result = render(24300, 18.3)
         self.assertIn("(18%)", result)
 
-    def test_ansi_reset_present(self):
-        result = render(1000, 5.0)
-        self.assertIn(RESET, result)
+    def test_ansi_reset_always_present(self):
+        for tokens in (0, 85_000, 112_000):
+            with self.subTest(tokens=tokens):
+                self.assertIn(RESET, render(tokens, 10.0))
 
 
 if __name__ == "__main__":
