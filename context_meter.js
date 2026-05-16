@@ -6,7 +6,7 @@ const { execSync } = require('child_process');
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
 const RED = '\x1b[31m';
-const GRAY = '\x1b[2m';
+const GRAY = '\x1b[90m';
 const CYAN = '\x1b[36m';
 const RESET = '\x1b[0m';
 
