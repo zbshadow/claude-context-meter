@@ -2,6 +2,10 @@
 'use strict';
 
 const { execSync } = require('child_process');
+const fs = require('fs');
+const https = require('https');
+const os = require('os');
+const path = require('path');
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
@@ -14,6 +18,10 @@ const GREEN_THRESHOLD = 70_000;
 const YELLOW_THRESHOLD = 100_000;
 
 const ANSI = { green: GREEN, yellow: YELLOW, red: RED };
+
+const CURRENT_VERSION = '1.0.4';
+const CACHE_FILE = path.join(os.homedir(), '.claude', 'plugins', 'context-meter', '.update-cache.json');
+const NPM_URL = 'https://registry.npmjs.org/claude-context-meter/latest';
 
 const KNOWN_PLATFORMS = {
   'github.com': 'GitHub',
@@ -40,10 +48,55 @@ function parseInput(data) {
     const tokens = parseInt(cw.total_input_tokens ?? 0, 10) || 0;
     const pct = parseFloat(cw.used_percentage ?? 0) || 0;
     const model = payload.model?.display_name || null;
-    return [tokens, pct, model];
+    const sessionId = payload.session_id || null;
+    return [tokens, pct, model, sessionId];
   } catch {
-    return [0, 0, null];
+    return [0, 0, null, null];
   }
+}
+
+function isNewer(latest, current) {
+  const parse = v => v.split('.').map(Number);
+  const [la, lb, lc] = parse(latest);
+  const [ca, cb, cc] = parse(current);
+  return la > ca || (la === ca && lb > cb) || (la === ca && lb === cb && lc > cc);
+}
+
+function readCache() {
+  try {
+    return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(data) {
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(data));
+  } catch { /* ignore write failures */ }
+}
+
+function spawnVersionCheck(sessionId) {
+  const req = https.get(NPM_URL, res => {
+    let body = '';
+    res.on('data', chunk => { body += chunk; });
+    res.on('end', () => {
+      try {
+        const { version } = JSON.parse(body);
+        writeCache({ session_id: sessionId, latest_version: version });
+      } catch { /* ignore parse failures */ }
+    });
+  });
+  req.on('error', () => {});
+}
+
+function checkForUpdate(sessionId) {
+  const cache = readCache();
+  if (!cache || cache.session_id !== sessionId) {
+    writeCache({ session_id: sessionId, latest_version: cache?.latest_version || null });
+    spawnVersionCheck(sessionId);
+  }
+  return cache?.latest_version || null;
 }
 
 function parseRemoteUrl(url) {
@@ -151,9 +204,14 @@ if (require.main === module) {
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', chunk => { data += chunk; });
   process.stdin.on('end', () => {
-    const [tokens, pct, model] = parseInput(data);
-    console.log(render(tokens, pct, detectVcs(), model));
+    const [tokens, pct, model, sessionId] = parseInput(data);
+    const latestVersion = checkForUpdate(sessionId);
+    const lines = [render(tokens, pct, detectVcs(), model)];
+    if (latestVersion && isNewer(latestVersion, CURRENT_VERSION)) {
+      lines.push(`${YELLOW}New version available. Run: npx claude-context-meter@latest install${RESET}`);
+    }
+    console.log(lines.join('\n'));
   });
 }
 
-module.exports = { formatTokens, classify, parseInput, detectVcs, formatVcs, render };
+module.exports = { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer, checkForUpdate };

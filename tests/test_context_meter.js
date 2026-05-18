@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { formatTokens, classify, parseInput, detectVcs, formatVcs, render } = require('../context_meter.js');
+const { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer } = require('../context_meter.js');
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
@@ -50,6 +50,16 @@ test('parseInput: missing model returns null', () => {
   const [, , model] = parseInput(data);
   assert.equal(model, null);
 });
+test('parseInput: extracts session_id', () => {
+  const data = JSON.stringify({ session_id: 'abc-123', context_window: { total_input_tokens: 1000, used_percentage: 1 } });
+  const [, , , sessionId] = parseInput(data);
+  assert.equal(sessionId, 'abc-123');
+});
+test('parseInput: missing session_id returns null', () => {
+  const data = JSON.stringify({ context_window: { total_input_tokens: 1000, used_percentage: 1 } });
+  const [, , , sessionId] = parseInput(data);
+  assert.equal(sessionId, null);
+});
 test('parseInput: missing total_input_tokens defaults to 0', () => {
   const data = JSON.stringify({ context_window: { used_percentage: 10.0 } });
   const [tokens] = parseInput(data);
@@ -60,18 +70,30 @@ test('parseInput: missing used_percentage defaults to 0', () => {
   const [, pct] = parseInput(data);
   assert.equal(pct, 0);
 });
-test('parseInput: empty JSON defaults both to 0 and null model', () => {
-  const [tokens, pct, model] = parseInput('{}');
+test('parseInput: empty JSON defaults to 0, null, null, null', () => {
+  const [tokens, pct, model, sessionId] = parseInput('{}');
   assert.equal(tokens, 0);
   assert.equal(pct, 0);
   assert.equal(model, null);
+  assert.equal(sessionId, null);
 });
-test('parseInput: malformed JSON defaults both to 0 and null model', () => {
-  const [tokens, pct, model] = parseInput('not json at all');
+test('parseInput: malformed JSON defaults to 0, null, null, null', () => {
+  const [tokens, pct, model, sessionId] = parseInput('not json at all');
   assert.equal(tokens, 0);
   assert.equal(pct, 0);
   assert.equal(model, null);
+  assert.equal(sessionId, null);
 });
+
+// ---------------------------------------------------------------------------
+// Version Comparator
+// ---------------------------------------------------------------------------
+test('isNewer: patch bump is newer', () => assert.ok(isNewer('1.0.5', '1.0.4')));
+test('isNewer: minor bump is newer', () => assert.ok(isNewer('1.1.0', '1.0.9')));
+test('isNewer: major bump is newer', () => assert.ok(isNewer('2.0.0', '1.9.9')));
+test('isNewer: same version is not newer', () => assert.ok(!isNewer('1.0.4', '1.0.4')));
+test('isNewer: older patch is not newer', () => assert.ok(!isNewer('1.0.3', '1.0.4')));
+test('isNewer: older minor is not newer', () => assert.ok(!isNewer('1.0.9', '1.1.0')));
 
 // ---------------------------------------------------------------------------
 // VCS Detector
