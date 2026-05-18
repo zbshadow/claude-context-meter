@@ -19,7 +19,7 @@ const YELLOW_THRESHOLD = 100_000;
 
 const ANSI = { green: GREEN, yellow: YELLOW, red: RED };
 
-const CURRENT_VERSION = '1.0.4';
+const CURRENT_VERSION = '1.0.5';
 const CACHE_FILE = path.join(os.homedir(), '.claude', 'plugins', 'context-meter', '.update-cache.json');
 const NPM_URL = 'https://registry.npmjs.org/claude-context-meter/latest';
 
