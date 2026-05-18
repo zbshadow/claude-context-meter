@@ -1,32 +1,23 @@
 # claude-context-meter
 
-A Claude Code plugin that adds a persistent context window usage meter to the status line. After every API response you'll see something like:
+[![npm version](https://img.shields.io/npm/v/claude-context-meter)](https://www.npmjs.com/package/claude-context-meter)
+[![npm downloads](https://img.shields.io/npm/dm/claude-context-meter)](https://www.npmjs.com/package/claude-context-meter)
+[![license](https://img.shields.io/npm/l/claude-context-meter)](LICENSE)
+[![node](https://img.shields.io/node/v/claude-context-meter)](package.json)
+
+> Persistent context window meter for the Claude Code status line — shows model, token usage, and git state after every response.
 
 ```
-Context: 24k (18%) · [GitHub/my-project/main]
+Sonnet 4.6 · Context: 24k (18%) · [GitHub/my-project/main]
 ```
 
-Color-coded by pressure level:
+## Highlights
 
-| Zone   | Token range      | Context numbers | VCS segment         |
-|--------|------------------|-----------------|---------------------|
-| Green  | < 70,000         | Green           | Gray (clean) / Cyan (dirty) |
-| Yellow | 70,000–100,000   | Yellow          | Gray (clean) / Cyan (dirty) |
-| Red    | > 100,000        | Red             | Gray (clean) / Cyan (dirty) |
-
-In the red zone a suggestion is appended:
-
-```
-Context: 112k (56%) · Consider /compact or /clear · [GitHub/my-project/main]
-```
-
-**VCS segment** — if you're inside a git repository, the current platform, repo, and branch are shown at the end of the line. The segment turns cyan with a `*` when there are uncommitted changes:
-
-```
-Context: 24k (18%) · [GitHub/my-project/main*]
-```
-
-The status line updates automatically — no polling or background process required.
+- **Model name** — shows the active model (e.g. `Sonnet 4.6`, `Opus 4.7`) at a glance
+- **Color-coded pressure** — green → yellow → red as context fills up
+- **Git awareness** — platform, repo, and branch; turns cyan with `*` on dirty working tree
+- **Update notifications** — yellow prompt in the status line when a newer version is available
+- **Zero overhead** — no polling, no background process; runs only when Claude Code updates the status line
 
 ## Installation
 
@@ -34,7 +25,58 @@ The status line updates automatically — no polling or background process requi
 npx claude-context-meter install
 ```
 
-This copies the plugin to `~/.claude/plugins/context-meter/` and updates `~/.claude/settings.json` automatically. Open a new Claude Code session to activate it.
+Copies the plugin to `~/.claude/plugins/context-meter/` and wires up `~/.claude/settings.json`. Open a new Claude Code session to activate.
+
+## Status line reference
+
+### Zones
+
+| Zone   | Token range    | Color  |
+|--------|----------------|--------|
+| Green  | < 70,000       | Green  |
+| Yellow | 70,000–100,000 | Yellow |
+| Red    | > 100,000      | Red    |
+
+### Examples
+
+Clean branch, green zone:
+```
+Sonnet 4.6 · Context: 24k (18%) · [GitHub/my-project/main]
+```
+
+Dirty working tree (uncommitted changes):
+```
+Sonnet 4.6 · Context: 24k (18%) · [GitHub/my-project/main*]
+```
+
+Red zone with compact suggestion:
+```
+Sonnet 4.6 · Context: 112k (56%) · Consider /compact or /clear · [GitHub/my-project/main]
+```
+
+Detached HEAD:
+```
+Sonnet 4.6 · Context: 24k (18%) · [GitHub/my-project] (HEAD detached at a3f9c12)
+```
+
+No git repository:
+```
+Sonnet 4.6 · Context: 24k (18%) · [No version control]
+```
+
+## Updating
+
+When a newer version is on npm, a second line appears in the status bar:
+
+```
+New version available. Run: npx claude-context-meter@latest install
+```
+
+Run that command to update and redeploy in one step:
+
+```sh
+npx claude-context-meter@latest install
+```
 
 ## Uninstallation
 
@@ -42,27 +84,14 @@ This copies the plugin to `~/.claude/plugins/context-meter/` and updates `~/.cla
 npx claude-context-meter uninstall
 ```
 
-This removes the plugin files and cleans up the `statusLine` entry from `~/.claude/settings.json`. Open a new Claude Code session to complete the removal.
+Removes plugin files and cleans up the `statusLine` entry from `~/.claude/settings.json`. Open a new Claude Code session to complete the removal.
 
 ## Prerequisites
 
-- **Claude Code** (any version that supports the `statusLine` setting)
-- **Node.js** ≥ 18 — already installed as part of Claude Code; no additional installation required
+- **Claude Code** — any version that supports the `statusLine` setting
+- **Node.js ≥ 18** — bundled with Claude Code; no separate installation needed
 
-## Verifying the installation
-
-After opening a new Claude Code session you should see a status line that reads:
-
-```
-Context: 0 (0%) · [GitHub/my-project/main]
-```
-
-Send any message to Claude. After the API response the token count and percentage will update. If the status line does not appear, check that:
-
-- You opened a **new** Claude Code session after running the installer
-- `~/.claude/settings.json` contains a `statusLine` entry pointing to the plugin
-
-## Running tests
+## Development
 
 ```sh
 node --test tests/test_context_meter.js
