@@ -6,7 +6,7 @@ const { formatTokens, classify, parseInput, detectVcs, formatVcs, render } = req
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
 const RED = '\x1b[31m';
-const GRAY = '\x1b[90m';
+const GRAY = '\x1b[38;5;245m';
 const CYAN = '\x1b[36m';
 const RESET = '\x1b[0m';
 
@@ -40,6 +40,16 @@ test('parseInput: well-formed payload', () => {
   assert.equal(tokens, 24300);
   assert.ok(Math.abs(pct - 18.3) < 0.001);
 });
+test('parseInput: extracts model display_name', () => {
+  const data = JSON.stringify({ context_window: { total_input_tokens: 1000, used_percentage: 1 }, model: { id: 'claude-sonnet-4-6', display_name: 'Sonnet 4.6' } });
+  const [, , model] = parseInput(data);
+  assert.equal(model, 'Sonnet 4.6');
+});
+test('parseInput: missing model returns null', () => {
+  const data = JSON.stringify({ context_window: { total_input_tokens: 1000, used_percentage: 1 } });
+  const [, , model] = parseInput(data);
+  assert.equal(model, null);
+});
 test('parseInput: missing total_input_tokens defaults to 0', () => {
   const data = JSON.stringify({ context_window: { used_percentage: 10.0 } });
   const [tokens] = parseInput(data);
@@ -50,15 +60,17 @@ test('parseInput: missing used_percentage defaults to 0', () => {
   const [, pct] = parseInput(data);
   assert.equal(pct, 0);
 });
-test('parseInput: empty JSON defaults both to 0', () => {
-  const [tokens, pct] = parseInput('{}');
+test('parseInput: empty JSON defaults both to 0 and null model', () => {
+  const [tokens, pct, model] = parseInput('{}');
   assert.equal(tokens, 0);
   assert.equal(pct, 0);
+  assert.equal(model, null);
 });
-test('parseInput: malformed JSON defaults both to 0', () => {
-  const [tokens, pct] = parseInput('not json at all');
+test('parseInput: malformed JSON defaults both to 0 and null model', () => {
+  const [tokens, pct, model] = parseInput('not json at all');
   assert.equal(tokens, 0);
   assert.equal(pct, 0);
+  assert.equal(model, null);
 });
 
 // ---------------------------------------------------------------------------
@@ -278,6 +290,23 @@ test('render: Context label is gray in all zones', () => {
   for (const tokens of [0, 85_000, 112_000]) {
     assert.ok(render(tokens, 10, NO_VCS).includes(`${GRAY}Context:`), `gray Context: missing for ${tokens}`);
   }
+});
+
+test('render: model name appears before Context when provided', () => {
+  const result = render(24300, 18, NO_VCS, 'Sonnet 4.6');
+  assert.ok(result.includes('Sonnet 4.6'));
+  assert.ok(result.indexOf('Sonnet 4.6') < result.indexOf('Context:'));
+});
+
+test('render: model name is in gray with dot separator', () => {
+  const result = render(24300, 18, NO_VCS, 'Sonnet 4.6');
+  assert.ok(result.includes(`${GRAY}Sonnet 4.6 · Context:`));
+});
+
+test('render: no model omits model segment and dot', () => {
+  const result = render(24300, 18, NO_VCS, null);
+  assert.ok(!result.includes('null'));
+  assert.ok(result.startsWith(`${GRAY}Context:`));
 });
 
 test('render: green zone numbers are green', () => {

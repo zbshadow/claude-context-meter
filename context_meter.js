@@ -39,9 +39,10 @@ function parseInput(data) {
     const cw = payload.context_window || {};
     const tokens = parseInt(cw.total_input_tokens ?? 0, 10) || 0;
     const pct = parseFloat(cw.used_percentage ?? 0) || 0;
-    return [tokens, pct];
+    const model = payload.model?.display_name || null;
+    return [tokens, pct, model];
   } catch {
-    return [0, 0];
+    return [0, 0, null];
   }
 }
 
@@ -127,13 +128,14 @@ function formatVcs(vcsState) {
     : `${GRAY} · ${content}${RESET}`;
 }
 
-function render(tokens, pct, vcsState = { type: 'none' }) {
+function render(tokens, pct, vcsState = { type: 'none' }, model = null) {
   const formatted = formatTokens(tokens);
   const pctInt = Math.round(pct);
   const category = classify(tokens);
   const zoneColor = ANSI[category];
 
-  let line = `${GRAY}Context: ${RESET}${zoneColor}${formatted} (${pctInt}%)${RESET}`;
+  const prefix = model ? `${GRAY}${model} · Context: ${RESET}` : `${GRAY}Context: ${RESET}`;
+  let line = `${prefix}${zoneColor}${formatted} (${pctInt}%)${RESET}`;
 
   if (category === 'red') {
     line += `${GRAY} · Consider /compact or /clear${RESET}`;
@@ -149,8 +151,8 @@ if (require.main === module) {
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', chunk => { data += chunk; });
   process.stdin.on('end', () => {
-    const [tokens, pct] = parseInput(data);
-    console.log(render(tokens, pct, detectVcs()));
+    const [tokens, pct, model] = parseInput(data);
+    console.log(render(tokens, pct, detectVcs(), model));
   });
 }
 
