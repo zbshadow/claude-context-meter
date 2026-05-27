@@ -19,7 +19,7 @@ const YELLOW_THRESHOLD = 100_000;
 
 const ANSI = { green: GREEN, yellow: YELLOW, red: RED };
 
-const CURRENT_VERSION = '1.0.5';
+const CURRENT_VERSION = '1.0.6';
 const CACHE_FILE = path.join(os.homedir(), '.claude', 'plugins', 'context-meter', '.update-cache.json');
 const NPM_URL = 'https://registry.npmjs.org/claude-context-meter/latest';
 
@@ -37,7 +37,7 @@ function formatTokens(count) {
 
 function classify(count) {
   if (count < GREEN_THRESHOLD) return 'green';
-  if (count <= YELLOW_THRESHOLD) return 'yellow';
+  if (count < YELLOW_THRESHOLD) return 'yellow';
   return 'red';
 }
 
@@ -122,38 +122,122 @@ function parseRemoteUrl(url) {
   return { platform, repo };
 }
 
-function detectVcs(cwd = process.cwd(), exec = execSync) {
-  const run = cmd => exec(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-
-  let branch;
+function parseTfvcCollectionUrl(url) {
+  if (!url) return { platform: 'TFS' };
   try {
-    branch = run('git branch --show-current');
-  } catch {
-    return { type: 'none' };
+    const host = new URL(url.trim()).hostname.toLowerCase();
+    if (host === 'dev.azure.com' || host.endsWith('.visualstudio.com')) {
+      return { platform: 'Azure DevOps' };
+    }
+  } catch { /* unparseable */ }
+  return { platform: 'TFS' };
+}
+
+function _walkUp(cwd, name, exists) {
+  let dir = cwd;
+  while (true) {
+    if (exists(path.join(dir, name))) return true;
+    const parent = path.dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
   }
+}
+
+function _detectGit(cwd, run) {
+  let branch;
+  try { branch = run('git branch --show-current'); } catch { return null; }
 
   let platform = null;
   let repo = null;
+  try { ({ platform, repo } = parseRemoteUrl(run('git remote get-url origin'))); } catch {}
+
+  let dirty = false;
+  try { dirty = run('git status --porcelain').length > 0; } catch {}
+
+  if (!branch) {
+    let hash = 'HEAD';
+    try { hash = run('git rev-parse --short HEAD'); } catch {}
+    return { type: 'detached', platform, repo, hash, dirty };
+  }
+  return { type: 'branch', platform, repo, branch, dirty };
+}
+
+function detectTfvc(cwd, run) {
+  let workspaceName = null;
+  let collectionUrl = null;
+  let serverPath = null;
+
   try {
-    ({ platform, repo } = parseRemoteUrl(run('git remote get-url origin')));
+    const workfold = run('tf workfold /noprompt');
+    const wsMatch = workfold.match(/Workspace\s*:\s*(\S+)/i);
+    if (wsMatch) workspaceName = wsMatch[1];
+    const collMatch = workfold.match(/Collection\s*:\s*(\S+)/i);
+    if (collMatch) collectionUrl = collMatch[1];
+    const pathMatch = workfold.match(/\$\/\S+/);
+    if (pathMatch) serverPath = pathMatch[0];
   } catch {
-    // no remote configured
+    return null;
+  }
+
+  const { platform } = parseTfvcCollectionUrl(collectionUrl);
+
+  let repo = null;
+  let branch = null;
+  if (serverPath) {
+    const parts = serverPath.replace(/^\$\//, '').split('/');
+    repo = parts[0] || null;
+    branch = parts.slice(1).join('/') || null;
   }
 
   let dirty = false;
   try {
-    dirty = run('git status --porcelain').length > 0;
-  } catch {
-    // default to clean if git status fails
+    const status = run('tf status /noprompt /recursive');
+    dirty = status.length > 0 && !/no pending changes/i.test(status);
+  } catch {}
+
+  return { type: 'tfvc', platform, repo: repo || workspaceName, branch, dirty };
+}
+
+const VCS_PROVIDERS = [
+  { key: 'git',  marker: '.git', detect: _detectGit },
+  { key: 'tfvc', marker: '$tf',  detect: detectTfvc },
+];
+
+const _defaultVcsCache = new Map();
+
+function _providerKeyForState(state) {
+  if (state.type === 'branch' || state.type === 'detached') return 'git';
+  return state.type;
+}
+
+function detectVcs(cwd = process.cwd(), exec = execSync, exists = fs.existsSync, _cache = _defaultVcsCache) {
+  const run = cmd => exec(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+
+  // Cache hit: re-run matching provider (refreshes branch/dirty, skips type discovery)
+  if (_cache.has(cwd)) {
+    const key = _cache.get(cwd);
+    if (key === 'none') return { type: 'none' };
+    const provider = VCS_PROVIDERS.find(p => p.key === key);
+    return (provider && provider.detect(cwd, run)) ?? { type: 'none' };
   }
 
-  if (!branch) {
-    let hash = 'HEAD';
-    try { hash = run('git rev-parse --short HEAD'); } catch { /* use fallback */ }
-    return { type: 'detached', platform, repo, hash, dirty };
+  // Smart detection: providers whose marker is found on disk go first
+  const hasMarker = new Set(VCS_PROVIDERS.filter(p => _walkUp(cwd, p.marker, exists)).map(p => p.key));
+  const ordered = [
+    ...VCS_PROVIDERS.filter(p => hasMarker.has(p.key)),
+    ...VCS_PROVIDERS.filter(p => !hasMarker.has(p.key)),
+  ];
+
+  for (const provider of ordered) {
+    const state = provider.detect(cwd, run);
+    if (state) {
+      _cache.set(cwd, _providerKeyForState(state));
+      return state;
+    }
   }
 
-  return { type: 'branch', platform, repo, branch, dirty };
+  _cache.set(cwd, 'none');
+  return { type: 'none' };
 }
 
 function formatVcs(vcsState) {
@@ -214,4 +298,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer, checkForUpdate };
+module.exports = { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer, checkForUpdate, parseTfvcCollectionUrl, detectTfvc };
