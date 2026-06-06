@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer, parseTfvcCollectionUrl, detectTfvc } = require('../context_meter.js');
+const { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer, parseTfvcPlatform, detectTfvc } = require('../context_meter.js');
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
@@ -107,8 +107,8 @@ function makeExec(responses) {
   };
 }
 
-// Wrapper that bypasses marker detection and uses a fresh cache — keeps tests isolated
-const detectVcsTest = (cwd, exec) => detectVcs(cwd, exec, () => false, new Map());
+// Wrapper that bypasses marker detection — keeps tests isolated from the real filesystem
+const detectVcsTest = (cwd, exec) => detectVcs(cwd, exec, () => false);
 
 const CLEAN = { 'git status --porcelain': '' };
 const DIRTY = { 'git status --porcelain': ' M context_meter.js\n' };
@@ -401,22 +401,25 @@ test('render: detached HEAD dirty is cyan with asterisk', () => {
 });
 
 // ---------------------------------------------------------------------------
-// TFVC Collection URL Parser
+// TFVC Platform Label Parser
 // ---------------------------------------------------------------------------
-test('parseTfvcCollectionUrl: Azure DevOps (dev.azure.com)', () => {
-  assert.equal(parseTfvcCollectionUrl('https://dev.azure.com/myorg/').platform, 'Azure DevOps');
+test('parseTfvcPlatform: dev.azure.com extracts org name from path', () => {
+  assert.equal(parseTfvcPlatform('https://dev.azure.com/myorg/'), 'myorg');
 });
-test('parseTfvcCollectionUrl: legacy visualstudio.com', () => {
-  assert.equal(parseTfvcCollectionUrl('https://myorg.visualstudio.com/').platform, 'Azure DevOps');
+test('parseTfvcPlatform: legacy visualstudio.com extracts org as subdomain', () => {
+  assert.equal(parseTfvcPlatform('https://myorg.visualstudio.com/'), 'myorg');
 });
-test('parseTfvcCollectionUrl: on-premise TFS server', () => {
-  assert.equal(parseTfvcCollectionUrl('http://tfsserver:8080/tfs/DefaultCollection').platform, 'TFS');
+test('parseTfvcPlatform: on-premise TFS server returns hostname', () => {
+  assert.equal(parseTfvcPlatform('http://tfsserver:8080/tfs/DefaultCollection'), 'tfsserver');
 });
-test('parseTfvcCollectionUrl: null URL returns TFS', () => {
-  assert.equal(parseTfvcCollectionUrl(null).platform, 'TFS');
+test('parseTfvcPlatform: private server with no port returns hostname', () => {
+  assert.equal(parseTfvcPlatform('http://tfs.acmecorp.com/tfs/DefaultCollection'), 'tfs.acmecorp.com');
 });
-test('parseTfvcCollectionUrl: unparseable URL returns TFS', () => {
-  assert.equal(parseTfvcCollectionUrl('not-a-url').platform, 'TFS');
+test('parseTfvcPlatform: null URL returns TFS', () => {
+  assert.equal(parseTfvcPlatform(null), 'TFS');
+});
+test('parseTfvcPlatform: unparseable URL returns TFS', () => {
+  assert.equal(parseTfvcPlatform('not-a-url'), 'TFS');
 });
 
 // ---------------------------------------------------------------------------
@@ -444,9 +447,9 @@ test('detectTfvc: Azure DevOps workspace, clean', () => {
     'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
     'tf status /noprompt /recursive': TFVC_STATUS_CLEAN,
   });
-  const state = detectTfvc('/fake', run);
+  const state = detectTfvc(run);
   assert.equal(state.type, 'tfvc');
-  assert.equal(state.platform, 'Azure DevOps');
+  assert.equal(state.platform, 'myorg');
   assert.equal(state.repo, 'MyProject');
   assert.equal(state.branch, 'Main');
   assert.equal(state.dirty, false);
@@ -457,7 +460,7 @@ test('detectTfvc: Azure DevOps workspace, dirty', () => {
     'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
     'tf status /noprompt /recursive': TFVC_STATUS_DIRTY,
   });
-  const state = detectTfvc('/fake', run);
+  const state = detectTfvc(run);
   assert.equal(state.dirty, true);
 });
 
@@ -466,9 +469,9 @@ test('detectTfvc: on-premise TFS, clean', () => {
     'tf workfold /noprompt': TFVC_WORKFOLD_TFS,
     'tf status /noprompt /recursive': TFVC_STATUS_CLEAN,
   });
-  const state = detectTfvc('/fake', run);
+  const state = detectTfvc(run);
   assert.equal(state.type, 'tfvc');
-  assert.equal(state.platform, 'TFS');
+  assert.equal(state.platform, 'tfsserver');
   assert.equal(state.repo, 'CorpProject');
   assert.equal(state.branch, 'Dev');
   assert.equal(state.dirty, false);
@@ -476,7 +479,12 @@ test('detectTfvc: on-premise TFS, clean', () => {
 
 test('detectTfvc: tf command not found returns null', () => {
   const run = makeExec({ 'tf workfold /noprompt': new Error('tf: command not found') });
-  assert.equal(detectTfvc('/fake', run), null);
+  assert.equal(detectTfvc(run), null);
+});
+
+test('detectTfvc: unrecognized workfold output returns null', () => {
+  const run = makeExec({ 'tf workfold /noprompt': 'tf version 16.0.0' });
+  assert.equal(detectTfvc(run), null);
 });
 
 test('detectTfvc: status failure defaults to clean', () => {
@@ -484,7 +492,7 @@ test('detectTfvc: status failure defaults to clean', () => {
     'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
     'tf status /noprompt /recursive': new Error('status failed'),
   });
-  const state = detectTfvc('/fake', run);
+  const state = detectTfvc(run);
   assert.equal(state.dirty, false);
 });
 
@@ -496,7 +504,7 @@ test('detectVcs: falls through to TFVC when not a git repo', () => {
   });
   const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'tfvc');
-  assert.equal(state.platform, 'Azure DevOps');
+  assert.equal(state.platform, 'myorg');
 });
 
 test('detectVcs: returns none when neither git nor tfvc', () => {
@@ -507,29 +515,15 @@ test('detectVcs: returns none when neither git nor tfvc', () => {
   assert.equal(detectVcsTest('/fake', exec).type, 'none');
 });
 
-test('detectVcs: caches provider type and skips discovery on repeat calls', () => {
-  const cache = new Map();
-  const exec1 = makeExec({ 'git branch --show-current': 'main\n', ...GITHUB_HTTPS, ...CLEAN });
-  detectVcs('/fake/cache-test', exec1, () => false, cache);
-  assert.equal(cache.get('/fake/cache-test'), 'git');
-
-  // Second call with different branch — only git commands run, no TFVC fallback attempted
-  const exec2 = makeExec({ 'git branch --show-current': 'develop\n', ...GITHUB_HTTPS, ...CLEAN });
-  const state = detectVcs('/fake/cache-test', exec2, () => false, cache);
-  assert.equal(state.branch, 'develop');
-});
-
 test('detectVcs: marker detection prioritises provider with matching marker', () => {
-  const cache = new Map();
   // exists returns true only for $tf (simulating a TFVC workspace without a .git dir)
   const existsTfvc = p => p.endsWith('$tf');
   const exec = makeExec({
     'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
     'tf status /noprompt /recursive': TFVC_STATUS_CLEAN,
   });
-  const state = detectVcs('/fake/marker-test', exec, existsTfvc, cache);
+  const state = detectVcs('/fake/marker-test', exec, existsTfvc);
   assert.equal(state.type, 'tfvc');
-  assert.equal(cache.get('/fake/marker-test'), 'tfvc');
 });
 
 // ---------------------------------------------------------------------------

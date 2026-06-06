@@ -37,7 +37,7 @@ function formatTokens(count) {
 
 function classify(count) {
   if (count < GREEN_THRESHOLD) return 'green';
-  if (count < YELLOW_THRESHOLD) return 'yellow';
+  if (count <= YELLOW_THRESHOLD) return 'yellow';
   return 'red';
 }
 
@@ -122,15 +122,21 @@ function parseRemoteUrl(url) {
   return { platform, repo };
 }
 
-function parseTfvcCollectionUrl(url) {
-  if (!url) return { platform: 'TFS' };
+function parseTfvcPlatform(url) {
+  if (!url) return 'TFS';
   try {
-    const host = new URL(url.trim()).hostname.toLowerCase();
-    if (host === 'dev.azure.com' || host.endsWith('.visualstudio.com')) {
-      return { platform: 'Azure DevOps' };
+    const u = new URL(url.trim());
+    const host = u.hostname.toLowerCase();
+    if (host === 'dev.azure.com') {
+      return u.pathname.split('/').filter(Boolean)[0] || 'Azure DevOps';
     }
-  } catch { /* unparseable */ }
-  return { platform: 'TFS' };
+    if (host.endsWith('.visualstudio.com')) {
+      return host.split('.')[0];
+    }
+    return host;
+  } catch {
+    return 'TFS';
+  }
 }
 
 function _walkUp(cwd, name, exists) {
@@ -143,7 +149,7 @@ function _walkUp(cwd, name, exists) {
   }
 }
 
-function _detectGit(cwd, run) {
+function _detectGit(run) {
   let branch;
   try { branch = run('git branch --show-current'); } catch { return null; }
 
@@ -162,7 +168,7 @@ function _detectGit(cwd, run) {
   return { type: 'branch', platform, repo, branch, dirty };
 }
 
-function detectTfvc(cwd, run) {
+function detectTfvc(run) {
   let workspaceName = null;
   let collectionUrl = null;
   let serverPath = null;
@@ -179,7 +185,9 @@ function detectTfvc(cwd, run) {
     return null;
   }
 
-  const { platform } = parseTfvcCollectionUrl(collectionUrl);
+  if (!workspaceName && !serverPath) return null;
+
+  const platform = parseTfvcPlatform(collectionUrl);
 
   let repo = null;
   let branch = null;
@@ -203,25 +211,9 @@ const VCS_PROVIDERS = [
   { key: 'tfvc', marker: '$tf',  detect: detectTfvc },
 ];
 
-const _defaultVcsCache = new Map();
-
-function _providerKeyForState(state) {
-  if (state.type === 'branch' || state.type === 'detached') return 'git';
-  return state.type;
-}
-
-function detectVcs(cwd = process.cwd(), exec = execSync, exists = fs.existsSync, _cache = _defaultVcsCache) {
+function detectVcs(cwd = process.cwd(), exec = execSync, exists = fs.existsSync) {
   const run = cmd => exec(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 
-  // Cache hit: re-run matching provider (refreshes branch/dirty, skips type discovery)
-  if (_cache.has(cwd)) {
-    const key = _cache.get(cwd);
-    if (key === 'none') return { type: 'none' };
-    const provider = VCS_PROVIDERS.find(p => p.key === key);
-    return (provider && provider.detect(cwd, run)) ?? { type: 'none' };
-  }
-
-  // Smart detection: providers whose marker is found on disk go first
   const hasMarker = new Set(VCS_PROVIDERS.filter(p => _walkUp(cwd, p.marker, exists)).map(p => p.key));
   const ordered = [
     ...VCS_PROVIDERS.filter(p => hasMarker.has(p.key)),
@@ -229,14 +221,10 @@ function detectVcs(cwd = process.cwd(), exec = execSync, exists = fs.existsSync,
   ];
 
   for (const provider of ordered) {
-    const state = provider.detect(cwd, run);
-    if (state) {
-      _cache.set(cwd, _providerKeyForState(state));
-      return state;
-    }
+    const state = provider.detect(run);
+    if (state) return state;
   }
 
-  _cache.set(cwd, 'none');
   return { type: 'none' };
 }
 
@@ -258,11 +246,15 @@ function formatVcs(vcsState) {
       : `${GRAY} · ${content}${RESET}`;
   }
 
-  const parts = [vcsState.platform, vcsState.repo, vcsState.branch].filter(Boolean);
-  const content = `[${parts.join('/')}${star}]`;
-  return dirty
-    ? `${GRAY} · ${RESET}${color}${content}${RESET}`
-    : `${GRAY} · ${content}${RESET}`;
+  if (vcsState.type === 'branch' || vcsState.type === 'tfvc') {
+    const parts = [vcsState.platform, vcsState.repo, vcsState.branch].filter(Boolean);
+    const content = `[${parts.join('/')}${star}]`;
+    return dirty
+      ? `${GRAY} · ${RESET}${color}${content}${RESET}`
+      : `${GRAY} · ${content}${RESET}`;
+  }
+
+  return `${GRAY} · [Unknown VCS]${RESET}`;
 }
 
 function render(tokens, pct, vcsState = { type: 'none' }, model = null) {
@@ -298,4 +290,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer, checkForUpdate, parseTfvcCollectionUrl, detectTfvc };
+module.exports = { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer, checkForUpdate, parseTfvcPlatform, detectTfvc };
