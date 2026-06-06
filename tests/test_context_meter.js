@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer } = require('../context_meter.js');
+const { formatTokens, classify, parseInput, detectVcs, formatVcs, render, isNewer, parseTfvcPlatform, detectTfvc } = require('../context_meter.js');
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
@@ -107,6 +107,9 @@ function makeExec(responses) {
   };
 }
 
+// Wrapper that bypasses marker detection — keeps tests isolated from the real filesystem
+const detectVcsTest = (cwd, exec) => detectVcs(cwd, exec, () => false);
+
 const CLEAN = { 'git status --porcelain': '' };
 const DIRTY = { 'git status --porcelain': ' M context_meter.js\n' };
 const GITHUB_HTTPS = { 'git remote get-url origin': 'https://github.com/zbshadow/Raven.git\n' };
@@ -116,7 +119,7 @@ const NO_REMOTE = { 'git remote get-url origin': new Error('no remote') };
 
 test('detectVcs: GitHub HTTPS remote, clean branch', () => {
   const exec = makeExec({ 'git branch --show-current': 'main\n', ...GITHUB_HTTPS, ...CLEAN });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'branch');
   assert.equal(state.platform, 'GitHub');
   assert.equal(state.repo, 'Raven');
@@ -126,14 +129,14 @@ test('detectVcs: GitHub HTTPS remote, clean branch', () => {
 
 test('detectVcs: GitHub HTTPS remote, dirty branch', () => {
   const exec = makeExec({ 'git branch --show-current': 'main\n', ...GITHUB_HTTPS, ...DIRTY });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'branch');
   assert.equal(state.dirty, true);
 });
 
 test('detectVcs: Bitbucket SSH remote on named branch', () => {
   const exec = makeExec({ 'git branch --show-current': 'feature/x\n', ...BITBUCKET_SSH, ...CLEAN });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'branch');
   assert.equal(state.platform, 'Bitbucket');
   assert.equal(state.repo, 'Raven');
@@ -143,7 +146,7 @@ test('detectVcs: Bitbucket SSH remote on named branch', () => {
 
 test('detectVcs: no remote configured, clean', () => {
   const exec = makeExec({ 'git branch --show-current': 'main\n', ...NO_REMOTE, ...CLEAN });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'branch');
   assert.equal(state.platform, null);
   assert.equal(state.repo, null);
@@ -152,7 +155,7 @@ test('detectVcs: no remote configured, clean', () => {
 
 test('detectVcs: no remote configured, dirty', () => {
   const exec = makeExec({ 'git branch --show-current': 'main\n', ...NO_REMOTE, ...DIRTY });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'branch');
   assert.equal(state.dirty, true);
 });
@@ -163,7 +166,7 @@ test('detectVcs: unknown host uses host as platform', () => {
     'git remote get-url origin': 'https://mygit.corp.com/org/Raven.git\n',
     ...CLEAN,
   });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.platform, 'mygit.corp.com');
   assert.equal(state.repo, 'Raven');
 });
@@ -175,7 +178,7 @@ test('detectVcs: detached HEAD, clean', () => {
     'git rev-parse --short HEAD': 'a3f9c12\n',
     ...CLEAN,
   });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'detached');
   assert.equal(state.platform, 'GitHub');
   assert.equal(state.repo, 'Raven');
@@ -190,19 +193,19 @@ test('detectVcs: detached HEAD, dirty', () => {
     'git rev-parse --short HEAD': 'a3f9c12\n',
     ...DIRTY,
   });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'detached');
   assert.equal(state.dirty, true);
 });
 
 test('detectVcs: no git repo returns none', () => {
   const exec = makeExec({ 'git branch --show-current': new Error('not a git repo') });
-  assert.equal(detectVcs('/fake', exec).type, 'none');
+  assert.equal(detectVcsTest('/fake', exec).type, 'none');
 });
 
 test('detectVcs: GitLab SSH remote', () => {
   const exec = makeExec({ 'git branch --show-current': 'develop\n', ...GITLAB_SSH, ...CLEAN });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.platform, 'GitLab');
   assert.equal(state.repo, 'Raven');
 });
@@ -213,7 +216,7 @@ test('detectVcs: git status failure defaults to clean', () => {
     ...GITHUB_HTTPS,
     'git status --porcelain': new Error('git status failed'),
   });
-  const state = detectVcs('/fake', exec);
+  const state = detectVcsTest('/fake', exec);
   assert.equal(state.type, 'branch');
   assert.equal(state.dirty, false);
 });
@@ -395,4 +398,153 @@ test('render: detached HEAD dirty is cyan with asterisk', () => {
   const result = render(24300, 18, vcs);
   assert.ok(result.includes(CYAN));
   assert.ok(result.includes('(HEAD detached at a3f9c12)*'));
+});
+
+// ---------------------------------------------------------------------------
+// TFVC Platform Label Parser
+// ---------------------------------------------------------------------------
+test('parseTfvcPlatform: dev.azure.com extracts org name from path', () => {
+  assert.equal(parseTfvcPlatform('https://dev.azure.com/myorg/'), 'myorg');
+});
+test('parseTfvcPlatform: legacy visualstudio.com extracts org as subdomain', () => {
+  assert.equal(parseTfvcPlatform('https://myorg.visualstudio.com/'), 'myorg');
+});
+test('parseTfvcPlatform: on-premise TFS server returns hostname', () => {
+  assert.equal(parseTfvcPlatform('http://tfsserver:8080/tfs/DefaultCollection'), 'tfsserver');
+});
+test('parseTfvcPlatform: private server with no port returns hostname', () => {
+  assert.equal(parseTfvcPlatform('http://tfs.acmecorp.com/tfs/DefaultCollection'), 'tfs.acmecorp.com');
+});
+test('parseTfvcPlatform: null URL returns TFS', () => {
+  assert.equal(parseTfvcPlatform(null), 'TFS');
+});
+test('parseTfvcPlatform: unparseable URL returns TFS', () => {
+  assert.equal(parseTfvcPlatform('not-a-url'), 'TFS');
+});
+
+// ---------------------------------------------------------------------------
+// TFVC Detector
+// ---------------------------------------------------------------------------
+const TFVC_WORKFOLD_AZURE = [
+  '=============================================================================',
+  'Workspace : MyWorkspace (user)',
+  'Collection : https://dev.azure.com/myorg/',
+  ' $/MyProject/Main : /home/user/myproject',
+].join('\n');
+
+const TFVC_WORKFOLD_TFS = [
+  '=============================================================================',
+  'Workspace : CorpWorkspace (CORP\\jdoe)',
+  'Collection : http://tfsserver:8080/tfs/DefaultCollection',
+  ' $/CorpProject/Dev : /home/user/corp',
+].join('\n');
+
+const TFVC_STATUS_CLEAN = 'There are no pending changes.';
+const TFVC_STATUS_DIRTY = 'edit        $/MyProject/Main/src/app.js';
+
+test('detectTfvc: Azure DevOps workspace, clean', () => {
+  const run = makeExec({
+    'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
+    'tf status /noprompt /recursive': TFVC_STATUS_CLEAN,
+  });
+  const state = detectTfvc(run);
+  assert.equal(state.type, 'tfvc');
+  assert.equal(state.platform, 'myorg');
+  assert.equal(state.repo, 'MyProject');
+  assert.equal(state.branch, 'Main');
+  assert.equal(state.dirty, false);
+});
+
+test('detectTfvc: Azure DevOps workspace, dirty', () => {
+  const run = makeExec({
+    'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
+    'tf status /noprompt /recursive': TFVC_STATUS_DIRTY,
+  });
+  const state = detectTfvc(run);
+  assert.equal(state.dirty, true);
+});
+
+test('detectTfvc: on-premise TFS, clean', () => {
+  const run = makeExec({
+    'tf workfold /noprompt': TFVC_WORKFOLD_TFS,
+    'tf status /noprompt /recursive': TFVC_STATUS_CLEAN,
+  });
+  const state = detectTfvc(run);
+  assert.equal(state.type, 'tfvc');
+  assert.equal(state.platform, 'tfsserver');
+  assert.equal(state.repo, 'CorpProject');
+  assert.equal(state.branch, 'Dev');
+  assert.equal(state.dirty, false);
+});
+
+test('detectTfvc: tf command not found returns null', () => {
+  const run = makeExec({ 'tf workfold /noprompt': new Error('tf: command not found') });
+  assert.equal(detectTfvc(run), null);
+});
+
+test('detectTfvc: unrecognized workfold output returns null', () => {
+  const run = makeExec({ 'tf workfold /noprompt': 'tf version 16.0.0' });
+  assert.equal(detectTfvc(run), null);
+});
+
+test('detectTfvc: status failure defaults to clean', () => {
+  const run = makeExec({
+    'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
+    'tf status /noprompt /recursive': new Error('status failed'),
+  });
+  const state = detectTfvc(run);
+  assert.equal(state.dirty, false);
+});
+
+test('detectVcs: falls through to TFVC when not a git repo', () => {
+  const exec = makeExec({
+    'git branch --show-current': new Error('not a git repo'),
+    'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
+    'tf status /noprompt /recursive': TFVC_STATUS_CLEAN,
+  });
+  const state = detectVcsTest('/fake', exec);
+  assert.equal(state.type, 'tfvc');
+  assert.equal(state.platform, 'myorg');
+});
+
+test('detectVcs: returns none when neither git nor tfvc', () => {
+  const exec = makeExec({
+    'git branch --show-current': new Error('not a git repo'),
+    'tf workfold /noprompt': new Error('tf: command not found'),
+  });
+  assert.equal(detectVcsTest('/fake', exec).type, 'none');
+});
+
+test('detectVcs: marker detection prioritises provider with matching marker', () => {
+  // exists returns true only for $tf (simulating a TFVC workspace without a .git dir)
+  const existsTfvc = p => p.endsWith('$tf');
+  const exec = makeExec({
+    'tf workfold /noprompt': TFVC_WORKFOLD_AZURE,
+    'tf status /noprompt /recursive': TFVC_STATUS_CLEAN,
+  });
+  const state = detectVcs('/fake/marker-test', exec, existsTfvc);
+  assert.equal(state.type, 'tfvc');
+});
+
+// ---------------------------------------------------------------------------
+// TFVC Formatter
+// ---------------------------------------------------------------------------
+test('formatVcs: clean TFVC branch is gray, no asterisk', () => {
+  const result = formatVcs({ type: 'tfvc', platform: 'Azure DevOps', repo: 'MyProject', branch: 'Main', dirty: false });
+  assert.ok(result.includes(GRAY));
+  assert.ok(!result.includes(CYAN));
+  assert.ok(result.includes('[Azure DevOps/MyProject/Main]'));
+  assert.ok(!result.includes('*'));
+});
+
+test('formatVcs: dirty TFVC branch is cyan with asterisk', () => {
+  const result = formatVcs({ type: 'tfvc', platform: 'TFS', repo: 'CorpProject', branch: 'Dev', dirty: true });
+  assert.ok(result.includes(CYAN));
+  assert.ok(result.includes('[TFS/CorpProject/Dev*]'));
+});
+
+test('formatVcs: TFVC with no branch shows platform and repo only', () => {
+  const result = formatVcs({ type: 'tfvc', platform: 'TFS', repo: 'MyWorkspace', branch: null, dirty: false });
+  assert.ok(result.includes('[TFS/MyWorkspace]'));
+  assert.ok(!result.includes('/null'));
 });
